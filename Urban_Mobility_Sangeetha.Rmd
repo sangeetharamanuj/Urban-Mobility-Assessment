@@ -1,0 +1,397 @@
+---
+title: "Urban Mobility Assessment in Washington D.C."
+author: "Exploratory Data Analysis by Sangeetha Ramanuj"
+output: html_notebook
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(eval = TRUE)
+```
+
+Bike sharing systems are a (relatively) new mobility option in cities across the United States and the world. They're also one of my professor, Josh Davidson's major research interests. Dock-based bike share systems allow users to rent a bike from a particular position and return back at another position. There is policy interest in these systems regarding how they can help to alleviate traffic, reduce emissions and promote greater public health.
+
+On the data side of things, bike sharing systems, provide quite robust and usually open sourced data that is readily available for research. Opposed to other transport services such as bus or subway, the duration and location of travel (at least departure and arrival position) is explicitly recorded in these systems.
+
+This feature of the data allows us to use bike share data as a means to measure changes in mobility in a city.
+
+For some examples of Josh's work with bike share data, refer to this [policy digest](https://kleinmanenergy.upenn.edu/research/publications/opportunities-to-equitably-expand-bikeshare-learning-from-the-covid-19-period/) and this [journal article](https://doi.org/10.1177/03611981221098390).
+
+## Packages
+
+I used the **tidyverse** package for much of the data wrangling and visualization. The data lives in the **dsbox** package.
+
+```{r load-packages, message = FALSE, eval = TRUE}
+library(tidyverse)
+library(dsbox)
+```
+
+## Data
+
+The data can be found in **dsbox** and is called `dcbikeshare`. You can find out more about the data set by inspecting its documentation [here](https://rstudio-education.github.io/dsbox/reference/dcbikeshare.html).
+
+The data include daily bike rental counts (by members and casual users) of Capital Bike share in Washington, DC in 2011 and 2012 as well as weather information on these days.
+The original data sources are <http://capitalbikeshare.com/system-data> and <http://www.freemeteo.com>.
+
+```{r}
+?dcbikeshare
+dcbikeshare # Calling in the data set
+```
+
+## Data wrangling
+
+1. I re-coded the `season` variable to be a factor with meaningful level names as outlined in the code book, with spring as the baseline/reference level.
+
+I used the `class` function to check the class of the variable `season`, the `recode` function to re-code it to meaningful level names, `relevel` to change reference levels, and `levels` to verify the reference level.
+
+```{r}
+# Converting "season" from a character to a factor variable and checking its type
+dcbikeshare$season <- as.factor(dcbikeshare$season)
+class(dcbikeshare$season)
+
+# Mutating a column "season" and re-coding the original variable to meaningful level names
+dcbikeshare_withseason <- dcbikeshare %>% 
+  mutate(season = recode(season, 
+                         "1" = "winter",
+                         "2" = "spring",
+                         "3" = "summer",
+                         "4" = "fall")) 
+
+# Re-leveling the column to change spring as the baseline/ reference level
+dcbikeshare_withseason$season <- relevel(dcbikeshare_withseason$season, ref = "spring") 
+
+# Verifying reference levels
+levels(dcbikeshare_withseason$season)
+```
+
+Code for binary variable `working day`
+
+```{r}
+# Repeating the same process 
+dcbikeshare_withholiday$workingday <- as.factor(dcbikeshare_withholiday$workingday)
+class(dcbikeshare_withholiday$workingday)
+
+dcbikeshare_withworkingday <- dcbikeshare_withholiday %>% 
+  mutate(workingday = recode(workingday,
+                             "0" = "no",
+                             "1" = "yes")) 
+
+dcbikeshare_withworkingday$workingday <- relevel(dcbikeshare_withworkingday$workingday, ref = "no") 
+levels(dcbikeshare_withworkingday$workingday)
+```
+
+3.  I re-coded the `yr` variable to be a factor with levels 2011 and 2012, with 2011 as the baseline level.
+
+```{r}
+dcbikeshare_withworkingday$yr <- as.factor(dcbikeshare_withworkingday$yr)
+class(dcbikeshare_withworkingday$yr)
+
+dcbikeshare_withyr <- dcbikeshare_withworkingday %>% 
+  mutate(yr = recode(yr,
+                     "0" = "2011",
+                     "1" = "2012")) 
+
+dcbikeshare_withyr$yr <- relevel(dcbikeshare_withyr$yr, ref = "2011") 
+levels(dcbikeshare_withyr$yr)
+```
+
+4. I re-coded the `weathersit` variable as 1 - clear, 2 - mist, 3 - light precipitation, and 4 - heavy precipitation, with clear as the baseline/reference level.
+
+```{r}
+dcbikeshare_withyr$weathersit <- as.factor(dcbikeshare_withyr$weathersit)
+class(dcbikeshare_withyr$weathersit)
+
+dcbikeshare_withweathersit <- dcbikeshare_withyr %>% 
+  mutate(weathersit = recode(weathersit,
+                             "1" = "clear",
+                             "2" = "mist",
+                             "3" = "light precipitation",
+                             "4" = "heavy precipitation")) 
+
+dcbikeshare_withweathersit$weathersit <- relevel(dcbikeshare_withweathersit$weathersit, ref = "clear") 
+levels(dcbikeshare_withweathersit$weathersit)
+```
+
+5.  I calculated raw temperature, feeling temperature, humidity, and wind speed as their values given in the data set multiplied by the maximum raw values for each variable. Instead of writing over the existing variables, I stored them in new variables.
+    
+```{r}
+# Mutating columns with their raw values calculated as stated in the code book for each variable
+dcbikeshare_values <- dcbikeshare_withweathersit %>%
+  mutate(temp_raw = temp * 41, 
+         feeling_temp_raw = atemp * 50, 
+         humidity_raw = hum * 100, 
+         windspeed_raw = windspeed * 67)
+
+select(dcbikeshare_values, c(temp_raw:windspeed_raw))
+```
+
+6. To account for possible errors, I checked if the sum of `casual` and `registered` adds up to `cnt` for each record. One way of doing this is to create a new column that takes on the value `TRUE` if they add up and `FALSE` if not, and then checking if all values in that column are `TRUE`s.
+    
+```{r}
+# Mutating a column that takes on the value `TRUE` if they add up and `FALSE` if they don't
+dcbikeshare_final <- dcbikeshare_values %>%
+  mutate(check_sum = ifelse(casual + registered == cnt, TRUE, FALSE))
+
+# Checking if all the values under that column are true
+all(dcbikeshare_final$check_sum)
+```
+
+## Visualizations
+
+1. To display the relationship between bike rentals and date, I created a scatterplot with the points shaded by temperature.
+
+```{r}
+# Creating our scatter plot with points shaded by temperature
+ggplot(dcbikeshare_final, aes(x = dteday, y = cnt, color = temp_raw)) +
+  geom_point() +
+  labs(title = "Bike Rentals vs. Date",
+    x = "Date",
+    y = "Bike Rentals")
+```
+
+**Observations** 
+
+- The number of bike rentals peak by June/July 2011 and seem to dip by Jan 2012. Similarly, by the middle of 2012 (July/August), the number of bike rentals increase by a substantially higher amount than the previous year. This could be because of the summer season which allows more people to bike outside. 
+
+- The increase in bike rentals in 2012 indicates that more people are adopting bike rentals, perhaps due to more awareness or increased availability of bikes.
+
+- During winter (Dec/Jan), the number of bike rentals are the least. However, it does look like some people do bike in the cold weather.
+
+-  Typically, the number of bike rentals have been the highest when the raw temperature has been in the range of 25 to 35 degrees Celsius.
+
+2. To display the relationship between bike rentals and season, I created a bar plot.
+
+```{r}
+# Creating a horizontal bar plot for relationship between bike rentals and season 
+ggplot(dcbikeshare_final) +
+  geom_col(aes(x = cnt, y = season), fill = "light green") +
+  labs(title = "Relationship between season and bike rentals",
+       x = "Bike Rentals",
+       y = "Season")
+```
+
+**Observations** 
+
+- During the winter, there are far fewer bike rentals than in the spring, summer, and fall. The most number of bikes were rented in the summer. 
+
+- We can see that as we go from spring to summer, the number of bike rentals increases by approximately 10%, and subsequently reduces by just a slightly higher amount by fall. It further it seems to reduce to almost half the rentals of fall during winter.
+
+3. I generated a faceted plot that describes the relationship between total daily bike rentals and `temperature` by `holiday`. 
+
+```{r}
+ggplot(data = dcbikeshare_values) +
+  geom_point(aes(x = temp_raw, y = cnt),  color = "sky blue") +
+  labs(title = "Relationship between raw temperature and bike rentals by holiday",
+       x = "Temperature",
+       y = "Daily Bike Rentals") + 
+  facet_wrap(~holiday)
+```
+
+**Observations**
+
+- There seems to be a positive correlation between temperature and number of bike rentals independent of holiday; as DC days get warmer, more bikes are rented. So, the relationship between rentals and temperature is not moderated by whether the day is a holiday or not except for the number of rentals which is higher on non-holidays.
+
+- A significant number of bike rentals happen on non-holidays, which could mean that people are using bikes to go to their work places.
+
+4. I generated another faceted plot that describes the relationship between total daily bike rentals and `feeling temperature` by `season`.
+
+```{r}
+ggplot(data = dcbikeshare_values) +
+  geom_point(aes(x = feeling_temp_raw, y = cnt), color = "purple") +
+  labs(title = "Relationship between feeling temperature and bike rentals by season",
+       x = "Feeling Temperature",
+       y = "Bike Rentals") +
+  facet_wrap(~season)
+```
+
+**Observations**
+
+- The number of daily bike rentals are generally low at the beginning of each season and increases linearly as the feeling temperature increases, i.e, as the season proceeds.
+
+- It is surprising to note that even during winters when the feeling temperature is close to 0 degrees Celsius, some bikes have been rented. Similarly during summers, when the feeling temperature is greater than 40 degrees Celsius, the number of bike rentals decrease.
+
+- Much of the bike rentals are lesser than 4000 per day as compared to summer where a significant number of days have more than 4000 rentals. 
+
+- Based on the above four plots, we tend to see a positive linear relationship between daily bike rentals and feeling temperature independent of the season. This is probably because more people want to bike when the weather feels nicer outside.
+
+## Modelling
+
+1. I fit a linear model predicting total daily bike rentals from daily temperature. I then generated a scatter plot that represents this model which includes the best fit line from the regression.
+    
+```{r}
+daily_temp_model <- lm(cnt ~ temp_raw, dcbikeshare_final) 
+
+summary(daily_temp_model)
+
+ggplot(dcbikeshare_final, aes(x = temp_raw, y = cnt)) +
+  geom_point() +
+  labs(
+    x = "Daily Temperature",
+    y = "Total Daily Bike Rentals"
+  ) +
+  # `se = FALSE` does not display the confidence interval around the best fit line 
+  geom_smooth(method = "lm", se = FALSE, color = "red") 
+
+```
+
+**Observations** 
+
+- The slope of this linear model is 161.969, meaning that for every 1 degree Celsius increase in daily temperature, about 162 more bikes are rented that day. 
+
+- The y-intercept is 1214.642, meaning that even when the daily temperature is 0 degrees Celsius, about 1215 bikes are rented. 
+
+- The $R^2$ value is 0.3937, meaning that the linear model accounts for about 39% of variation.  
+
+2. I fit a model predicting total daily bike rentals from `temperature` and `holiday`. I generated a single scatter plot that represents this model and includes the best fit lines from the regression by `holiday`.
+
+```{r}
+# Creating the linear model
+daily_temp_model <- lm(cnt ~ temp_raw + holiday, dcbikeshare_values) 
+
+summary(daily_temp_model)
+
+# Plotting the regression
+ggplot(dcbikeshare_values, 
+       aes(x = temp_raw, y = cnt)) +
+  geom_point(aes(color = holiday)) + 
+# The `group = holiday` argument ensures that each line is fit separately by holiday and `method = lm` ensures that a linear regression model should be used
+  geom_smooth(aes(group = holiday, color = holiday), 
+              method = "lm", 
+              se = FALSE) +
+  labs(x = "Temperature", y = "Daily bike rentals") +
+  scale_color_discrete(name = "Holiday")
+```
+
+**Observations**
+
+- In this model, the intercept is 1239.001, which represents the number of daily bike rentals when temperature is 0 degrees Celsius and when it is not a holiday (that is `holiday = 0`).
+
+- The slope for `temperature` is 161.597, which means that for every one degree Celsius increase in temperature, the total number of bike rentals increases by around 162, holding the `holiday` value constant, i.e. whether it is a holiday or not.
+
+- The slope for `holidayyes` is -584.919, indicating that the total number of bike rentals is around 585 lesser than the total number of bike rentals for days that are not holidays, holding the temperature value constant.
+
+- The adjusted $R^2$ value is 0.3946, indicating that the model accounts for 39.46% of the variations.
+
+- It is important to note that this interpretation of the categorical variable slope depends on the reference category. Here, since `holiday = no` is the reference category, the slope of `holiday = yes` represents the difference between holidays and non-holidays in terms of number of daily bike rentals.
+
+*Do holidays predict a greater number of trips?*
+
+- No, holidays predict lesser number of trips compared to non-holidays.
+
+- According to the model, the number of daily bike rentals is lower on holidays than on non-holidays. The coefficient for `holidayyes` is -584.919, meaning that around 585 less bike trips happen on holidays than on days that are not holidays, holding the temperature value constant.
+
+- Additionally, you can see this in the scatter plot. The line of best fit on the scatter plot when `holiday = yes` is lower than the line of best fit for `holiday = no` for most of the temperature values.
+
+3. I fit another linear model predicting total daily bike rentals from daily feeling temperature and generated a scatter plot that represents this model and includes the best fit line from the regression.
+    
+```{r}
+daily_feeling_temp_model <- (lm(cnt ~ feeling_temp_raw, dcbikeshare_final)) 
+
+summary(daily_feeling_temp_model) 
+
+ggplot(dcbikeshare_final, aes(x = feeling_temp_raw, y = cnt)) +
+  geom_point() +
+  labs(
+    x = "Daily Feeling Temperature",
+    y = "Total Daily Bike Rentals"
+  ) +
+  geom_smooth(method = "lm", se = FALSE, color = "green") 
+```
+
+**Observations** 
+
+- The slope of this linear model is 150.037, meaning that for every 1 degree Celsius increase in daily feeling temperature, about 150 more bikes are rented that day. 
+
+- The y-intercept is 945.824 meaning that  when the daily temperature feels like 0 degrees Celsius, about 945 bikes are rented. 
+
+- The $R^2$ value is 0.3982, meaning that the linear model accounts for about 40% of variation.   
+
+The standard error for daily temperature is 7.444 whereas the standard error for daily feeling temperature is 6.831 for their respective slopes. Therefore, the daily feeling temperature might be a better predictor due to a lower error **especially since the $R^2$ values for both are very similar** - 0.3937 for daily temperature and 0.3982 for daily feeling temperature. This could be because there could be other factors like humidity, wind speed etc. that could change the feeling temperature from the raw temperature by deciding its "real feel", based on which people may decide to bike or not.
+
+4. I plotted the residuals from the model predicting total daily bike rentals from daily temperature against the fitted values for the same model.
+
+```{r}
+residual_model <- resid(daily_temp_model)
+
+ggplot(data.frame(y = residual_model, x = predict(daily_temp_model)), aes(x, y)) +
+  geom_point() +
+  geom_hline(yintercept = 0, color = "orange") +
+  labs(x = "Predicted values", y = "Residuals")
+```
+
+**Observations**
+
+- The residuals seem to be randomly distributed across the line of best fit. As a result, it seems reasonable to try to fit a linear model to the data.
+
+- However, the entire cluster shows a slight curvature which indicates that the fit might be less than an ideal fit compared to a completely random scatter of residuals.
+
+5. I fit a model predicting total daily bike rentals from `season` and `feeling temperature`. I generated a single scatter plot that represents this model and included the best fit lines from the regression by `season`.
+
+```{r}
+# Creating the linear model 
+daily_feeling_temp_model <- lm(cnt ~ feeling_temp_raw + season, dcbikeshare_values) 
+
+summary(daily_feeling_temp_model)
+
+# Plotting the regression 
+ggplot(dcbikeshare_values, 
+       aes(x = feeling_temp_raw, y = cnt)) +
+  geom_point(aes(color = season)) +
+# The `group = holiday` argument ensures that each line is fit separately by holiday and `method = lm` ensures that a linear regression model should be used
+  geom_smooth(aes(group = season, color = season), 
+              method = "lm", 
+              se = FALSE) +
+  labs(x = "Feeling Temperature", y = "Daily bike rentals") +
+  scale_color_discrete(name = "Season")
+```
+
+**Observations** 
+
+- In this model, the intercept is 1486.15, which represents the number of daily bike rentals when feeling temperature 0 degrees Celsius and when `season = spring`.
+
+- The slope for `feeling temperature` is 134.77, which means that for every one degree Celsius increase in the feeling temperature, the number of daily bike rentals increases by around 135, holding the `season` value constant.
+
+- The slope for `seasonwinter` is -882.82, indicating that the number of daily bike rentals is around 883 lesser than the total number of bike rentals when it is spring season (`season = spring`), holding the `feeling temperature` value constant.
+
+- The slope for `seasonsummer` is -261.73, indicating that the number of daily bike rentals is around 262 lesser than the total number of bike rentals when it is spring season (`season = spring`), holding the `feeling temperature` value constant.
+
+- The slope for `seasonfall` is  441.83, indicating that the number of daily bike rentals is around 442 more than the total number of bike rentals when it is spring season (`season = spring`), holding the `feeling temperature` value constant.
+
+- The adjusted $R^2$ value is 0.4515, indicating that this model accounts for 45.15% of the variations.
+
+- It is important to note that this interpretation of the categorical variable slope depends on the reference category. Here, since `season = spring` is the reference category, the slope of `seasonwinter` , `seasonsummer`, and `seasonfall` represents the difference between seasons in terms of total number of bike rentals.
+
+The coefficient for summer is negative, indicating that less bikes are rented in the summer than in the spring (the reference level). The fall coefficient is positive, indicating that more bikes are rented in the fall than in the spring or summer. As expected, the coefficient of winter is very negative, since far fewer bikes are rented in the winter than in other seasons. 
+
+**Note**: In most cities, we expect summer has the most bikes rentals, but not in DC. Washington D.C. spring is characterized by colorful blossoms and mild temperatures, whereas summers are too hot and humid. DC in the fall probably has nice weather because so many bikes were rented in the fall. In a city like Minneapolis with temperate summers, the summer would be most popular for bike rentals.  It is interesting that even when accounting for temperature, there are still significant differences between bike rentals per season. This is potentially because people fall into habits of biking or not each season. 
+
+6. I fit a model predicting total daily bike rentals from `temperature`, `holiday` and the interaction between `temperature` and `holiday`.
+
+```{r} 
+daily_temp_holiday_model <- lm(cnt ~ temp_raw * holiday, dcbikeshare_values)
+
+summary(daily_temp_holiday_model)
+```
+
+**Observations**
+
+- In this model, the intercept is 1268.697, which represents the number of daily bike rentals when all the predictor variables are zero (`temperature` is 0 degrees Celsius, `holiday` value is not a holiday).
+
+- The slope for `temperature` is 160.137, which means that for every one degree Celsius increase in temperature, the number of daily bike rentals increases by around 160, holding the `holiday` value constant, i.e. whether it is a holiday or not.
+
+- The slope for `holidayyes` is -1417.854, indicating that the number of daily bike rentals is around 1420 less than the total number of bike rentals for days that are not holidays, holding the temperature value constant.
+
+- The coefficient `holidayyes` * `temperature` is 43.590, indicating the additional increase of number of daily bike rentals as `temperature` increases by one degree Celsius when it is a holiday. 
+
+- The adjusted $R^2$ value is 0.3947, meaning that this model accounts for 39.47% of the variations.
+
+7. I fit a "log-log" model predicting total daily bike rentals from `windspeed`. I wrote the linear model and interpreted the slope given the log transformations.I took the `log(windspeed_raw)` to adjust the skew through this logarithmic transformation.
+
+```{r}
+windspeed_model <- lm(log(cnt) ~ log(windspeed_raw), dcbikeshare_values) 
+
+summary(windspeed_model)
+```
+
+**Observation**
+
+- The slope of this model is -0.28241, indicating that for every 1% increase in the wind speed, the total number of bike rentals decreases by about 0.3%. 
